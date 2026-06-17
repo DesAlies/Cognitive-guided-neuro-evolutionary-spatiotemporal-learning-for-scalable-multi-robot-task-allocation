@@ -1,0 +1,135 @@
+function [predictions, scores] = predict_WOA02_LSTM(new_data, model_path)
+
+
+% 默认模型路径
+if nargin < 2
+    model_path = './';
+end
+
+% 加载模型和参数
+try
+    % 加载模型
+    model_file = fullfile(model_path, 'WOA02_LSTM_model.mat');
+    param_file = fullfile(model_path, 'WOA02_LSTM_params.mat');
+    
+    % 检查文件是否存在
+    if ~exist(model_file, 'file')
+        error('模型文件不存在: %s', model_file);
+    end
+    
+    if ~exist(param_file, 'file')
+        error('参数文件不存在: %s', param_file);
+    end
+    
+    fprintf('正在加载模型...\n');
+    
+    % 加载模型
+    loaded_model = load(model_file);
+    if isfield(loaded_model, 'net')
+        net = loaded_model.net;
+    else
+        error('模型文件中未找到 net 变量');
+    end
+    
+    % 加载参数
+    loaded_params = load(param_file);
+    
+    % 获取必要参数
+    if isfield(loaded_params, 'ps_input')
+        ps_input = loaded_params.ps_input;
+    else
+        error('参数文件中未找到 ps_input');
+    end
+    
+    if isfield(loaded_params, 'ps_output')
+        ps_output = loaded_params.ps_output;
+    else
+        error('参数文件中未找到 ps_output');
+    end
+    
+    if isfield(loaded_params, 'f_')
+        f_ = loaded_params.f_;
+    else
+        error('参数文件中未找到 f_');
+    end
+    
+    if isfield(loaded_params, 'outdim')
+        outdim = loaded_params.outdim;
+    else
+        error('参数文件中未找到 outdim');
+    end
+    
+    fprintf('模型加载成功！\n');
+    fprintf('输入特征维度: %d\n', f_);
+    fprintf('输出维度: %d\n', outdim);
+    
+catch ME
+    fprintf('加载模型失败: %s\n', ME.message);
+    rethrow(ME);
+end
+
+% 检查输入数据维度
+[num_features, num_samples] = size(new_data);
+if num_features ~= f_
+    error('输入数据特征维度错误！期望 %d，实际 %d', f_, num_features);
+end
+
+fprintf('开始处理 %d 个样本...\n', num_samples);
+
+% 数据预处理（与训练时相同）
+% 1. 归一化
+new_data_normalized = mapminmax('apply', new_data, ps_input);
+
+% 2. 转换为网络要求的格式
+fprintf('数据格式转换...\n');
+
+% 将数据转换为序列格式（cell数组）
+Lp_new = cell(num_samples, 1);
+for i = 1:num_samples
+    % 与训练时相同的reshape操作
+    temp_data = double(reshape(new_data_normalized(:, i), f_, 1, 1, 1));
+    Lp_new{i, 1} = temp_data(:, :, 1, 1);
+end
+
+% 进行预测
+fprintf('正在进行预测...\n');
+scores = zeros(num_samples, outdim);
+
+% 使用batch预测以提高效率
+batch_size = 100; % 可以根据内存调整
+num_batches = ceil(num_samples / batch_size);
+
+for batch = 1:num_batches
+    start_idx = (batch-1) * batch_size + 1;
+    end_idx = min(batch * batch_size, num_samples);
+    batch_idx = start_idx:end_idx;
+    
+    fprintf('处理批次 %d/%d (%d 个样本)\n', batch, num_batches, length(batch_idx));
+    
+    % 提取当前批次
+    current_batch = Lp_new(batch_idx);
+    
+    % 预测
+    batch_scores = predict(net, current_batch);
+    
+    % 存储结果
+    scores(batch_idx, :) = batch_scores;
+end
+
+% 反归一化得到实际预测值
+predictions = mapminmax('reverse', scores', ps_output)';
+
+fprintf('预测完成！\n');
+
+% 显示前5个预测结果示例
+if num_samples > 0
+    fprintf('\n前5个样本的预测结果:\n');
+    for i = 1:min(5, num_samples)
+        fprintf('样本 %d: ', i);
+        for j = 1:outdim
+            fprintf('输出%d = %.4f  ', j, predictions(i, j));
+        end
+        fprintf('\n');
+    end
+end
+end
