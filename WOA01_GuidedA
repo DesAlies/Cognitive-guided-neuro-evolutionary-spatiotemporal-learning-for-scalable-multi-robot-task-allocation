@@ -1,0 +1,136 @@
+function [best_fitness, best_solution, convergence_curve] = WOA01_GuidedA(search_agents, max_iter, dim, lb, ub, DDcost, DDnumber, DDstore, target_cost)
+
+positions = chaotic_initialization(search_agents, dim, lb, ub, 3); 
+
+fitness = zeros(search_agents, 1);
+best_fitness = inf;
+best_solution = zeros(1, dim);
+convergence_curve = zeros(1, max_iter);
+
+% --- 主循环 ---
+step = 1;
+iter = 0;
+while iter < max_iter 
+    iter = iter + 1;
+
+    for i = 1:search_agents
+
+        positions(i,:) = max(positions(i,:), lb);
+        positions(i,:) = min(positions(i,:), ub);
+
+        fitness(i) = fitWOA(positions(i,:), DDcost, DDnumber, DDstore);
+
+        if fitness(i) < best_fitness
+            best_fitness = fitness(i);
+            best_solution = positions(i,:);
+        end
+    end
+    
+    convergence_curve(iter) = best_fitness;
+
+    gap = max(0, (best_fitness - target_cost) / (target_cost + 1e-5)); 
+    gap_factor = tanh(gap); 
+    
+
+    if gap < 0.001 
+        if step>=20
+            convergence_curve(iter:end) = best_fitness; 
+            step=step+1;
+            break;
+        end
+    end
+    decay_base = 2 - iter * (2 / max_iter); 
+    a = decay_base + 0.5 * gap_factor; 
+
+    a = min(2, a);
+    
+    a2 = -1 + iter * (-1 / max_iter);
+
+    for i = 1:search_agents
+        r1 = rand();
+        r2 = rand();
+
+        A = 2 * a * r1 - a;   % 包围猎物系数
+        C = 2 * r2;           % 气泡网系数
+
+
+        p = 0.3 + 0.5 * (iter / max_iter); 
+
+        if p < 0.5
+            if abs(A) < 1
+        
+                D = abs(C * best_solution - positions(i,:));
+                positions(i,:) = best_solution - A * D;
+            else
+                rand_idx = randi([1, search_agents]);
+                X_rand = positions(rand_idx,:);
+                D = abs(C * X_rand - positions(i,:));
+                positions(i,:) = X_rand - A * D;
+            end
+        else
+
+            b = 1;
+            l = (a2 - 1) * rand + 1;
+            D = abs(best_solution - positions(i,:));
+            positions(i,:) = D .* exp(b .* l) .* cos(2 * pi * l) + best_solution;
+        end
+
+
+        
+        beta = 1.5; 
+        sigma = (gamma(1+beta)*sin(pi*beta/2)/(gamma((1+beta)/2)*beta*2^((beta-1)/2)))^(1/beta);
+        levy_step = 0.01 * sigma * randn(1,dim) ./ (abs(randn(1,dim)).^(1/beta));
+
+        alpha_levy = 0.1 * (1 + gap_factor * 5); 
+        
+        positions(i,:) = positions(i,:) + alpha_levy .* levy_step .* (positions(i,:) - best_solution);
+
+        positions(i,:) = max(positions(i,:), lb);
+        positions(i,:) = min(positions(i,:), ub);
+        
+
+        decimal_part = positions(i,:) - floor(positions(i,:));
+        prob = rand(size(positions(i,:)));
+
+        positions(i,:) = floor(positions(i,:)) + (prob < decimal_part);
+    end
+
+    if mod(iter, 20) == 0 && gap_factor > 0.5
+ 
+        [~, replace_idx] = max(fitness); 
+        positions(replace_idx, :) = lb + (ub-lb).*rand(1, dim);
+    end
+end
+end
+
+
+function positions = chaotic_initialization(search_agents, dim, lb, ub, option)
+    % 参数设置
+    mu = 3.9;          % Logistic映射参数（必须>3.57）
+    k = 4;             % k≥2时混沌，通常取k=3,4,5
+    x0 = 0.723;        % 初始值（不能为0.25、0.5、0.75等特殊值）
+    
+    % 生成混沌序列
+    total_num = search_agents * dim;
+switch option
+
+    case 3
+    chaos_seq = chebyshev_chaos(total_num, k, x0);
+    chaos_seq = (chaos_seq + 1)/2; 
+end
+    chaos_seq = reshape(chaos_seq, search_agents, dim);
+
+    scaled_seq = lb + (ub - lb) .* chaos_seq;
+    positions = round(scaled_seq);
+    
+end
+
+
+function seq = chebyshev_chaos(n, k, x0)
+    seq = zeros(1, n);
+    seq(1) = x0;
+    for i = 2:n
+        theta = acos(seq(i-1)); 
+        seq(i) = cos(k * theta); 
+    end
+end
