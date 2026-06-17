@@ -1,0 +1,136 @@
+
+clc
+clear all
+%% 调用模型进行计算
+new_data = [];
+%% 2. 循环生成
+Num_Samples = 1;
+for k = 1:Num_Samples
+    % --- Step A: 随机生成任务场景 (构建 WOA02 需要的矩阵数据) ---
+    
+    % 1. 规模参数
+    num_tasks = randi([10, 20]); % 任务数 (dim) - 先减小范围测试
+    num_agents = randi([100, 200]);      % 执行者数 - 先减小范围测试
+    
+
+    base_cost = randi([10, 100]);
+    DDcost = base_cost + randn(num_agents, num_tasks) * 10; 
+    DDcost = abs(DDcost); 
+
+    DDdamage_possible = 0.02+0.98 * rand(num_agents, num_tasks)*60;
+    
+
+    DDnumber = randi([1, 5], num_agents, num_tasks);
+    
+
+    total_demand_est = sum(mean(DDnumber,1)) * num_tasks / num_agents;
+    DDstore = randi([floor(total_demand_est*0.8), floor(total_demand_est*2.0)], 1, num_agents);
+
+    feat1 = num_tasks;
+    feat2 = num_agents;
+    feat3 = mean(DDcost(:));
+    feat4 = mean(DDdamage_possible(:));
+    feat5 = mean(DDnumber(:));
+    feat6 = sum(DDstore) / (sum(sum(DDnumber))/num_agents);
+    feat7 = std(DDcost(:));
+    
+    X_vector = [feat1; feat2; feat3;feat4;feat5; feat6; feat7];
+    
+   new_data = [new_data  X_vector];
+end
+
+
+[predictions, scores] = predict_WOA04_LSTM(new_data, './');
+
+
+
+
+        prediction_value = predictions(1);
+        fprintf('LSTM预测值: %.6f\n', prediction_value);
+        
+        % 2. 查找最接近的数据行
+        data_file = 'Dataset_WOA02.xlsx';   data = readmatrix(data_file);
+        closest_row = find_closest_by_prediction(prediction_value, data);
+
+
+
+%% 改良鲸鱼算法
+   
+    search_agents = 20;   % 种群规模
+    max_iter = 200;       % 最大迭代次数
+    
+    dim = size(DDcost,2);             % 实数范围
+    lb = ones(1,dim);
+    ub = size(DDcost,1)*ones(1,dim);
+    tic;
+    [best_fitness1, best_solution1,convergence_curve1] = WOA01_GuidedA(search_agents,max_iter,dim,lb,ub,DDcost,DDnumber,DDstore, prediction_value);
+    toc;
+    best_fitness1
+    best_solution1
+
+
+   %   %情况1 ：任务数量减少
+     T=5;  %在10分钟后任务数量发生变动
+     decrease = 0; %任务减少数量
+     DDcost = DDcost(:,1:(num_tasks-decrease)); 
+     DDnumber = DDnumber(:,1:(num_tasks-decrease));
+     num_tasks=num_tasks-decrease;
+    
+%%   %情况2
+    % increase = 10; %任务增加数量
+    % DDcost_in = base_cost + randn(num_agents, increase) * 10; 
+    % DDcost_in = abs(DDcost_in); % 保证正数
+    % DDcost(:,(num_tasks+1):(num_tasks+increase)) = DDcost_in;
+    % DDnumber_in = randi([1, 5], num_agents, increase);
+    % DDnumber(:,(num_tasks+1):(num_tasks+increase)) = DDnumber_in;
+    % DDdamage_possible_in = 0.02+0.98 * rand(num_agents, increase)*60;
+    % DDdamage_possible(:,(num_tasks+1):(num_tasks+increase)) = DDdamage_possible_in;
+
+    %%   %情况3 
+    % r_decrease = 5; %智能体故障数量
+    % DDcost = DDcost(1:(num_agents-r_decrease),:); 
+    % DDnumber = DDnumber(1:(num_agents-r_decrease),:);
+    % 
+    % dim = size(DDcost,2);             % 实数范围
+    % lb = ones(1,dim);
+    % ub = size(DDcost,1)*ones(1,dim);
+    % 
+    for l=1:(num_tasks)%+increase
+        for h=1:num_agents
+            if DDdamage_possible(h,l)<T
+                DDcost(h,l)=Inf;
+                DDnumber(h,l)=Inf;
+            end
+        end
+    end
+
+    tic;
+    [best_fitness10, best_solution10,convergence_curve10] = WOA01_GuidedA(search_agents,max_iter,dim,lb,ub,DDcost,DDnumber,DDstore, prediction_value);
+    toc;
+    best_fitness10
+    best_solution10
+    %best_solution1=best_solution1(:,1:(num_tasks-decrease));
+    best_solution1=best_solution1(:,1:(num_tasks));
+    m1=0;
+    for i=1:length(best_solution1)
+        if (best_solution1(i)-best_solution10(i))~= 0
+            m1=m1+1;
+        end
+    end
+    m1
+    
+
+
+
+
+
+function closest_row = find_closest_by_prediction(prediction_value, data)
+    
+    column_8 = data(:, 8);
+
+    differences = abs(column_8 - prediction_value);
+
+    [min_diff, min_idx] = min(differences);
+
+    closest_row = data(min_idx, :);
+end
